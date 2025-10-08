@@ -8,6 +8,8 @@
 #include <thread>
 #include <nfc/nfc.h>
 
+#define MAX_TARGET_COUNT 16
+
 namespace py = pybind11;
 
 #define MODULE_NAME pylibnfc
@@ -73,7 +75,8 @@ struct NfcDevice
   uint64_t poll_for_tag(const uint8_t poll_number)
   {
     const uint8_t poll_period = 2; // 2 x 150 ms = 300 ms
-    constexpr std::array<nfc_modulation, 1> modulations = {
+    constexpr std::array<nfc_modulation, 2> modulations = {
+	nfc_modulation{ .nmt = NMT_FELICA, .nbr = NBR_212 },
         nfc_modulation{.nmt = NMT_ISO14443A, .nbr = NBR_106},
     };
 
@@ -87,12 +90,29 @@ struct NfcDevice
 
     if (result >= 1)
     {
-      uint64_t id = 0;
-      for (size_t i{0}; i < tag.nti.nai.szUidLen; ++i)
-      {
-        id = (id << 8) | tag.nti.nai.abtUid[i];
+      if (tag.nm.nmt == NMT_FELICA) {
+        uint64_t id = 0;
+        for (size_t i{0}; i < tag.nti.nfi.szLen; ++i)
+        {
+          id = (id << 8) | tag.nti.nfi.abtId[i];
+        }
+        return id;
       }
-      return id;
+      // Figure out modulation
+      if (tag.nm.nmt == NMT_ISO14443A) {
+        // Skip incorrect reads of Felica Mobile Suica cards
+        // There must be a better way to check this but it's not presenting itself to me right now
+        // One solution would be to present all IDs to Hula and no-sleep continue if the tag is unknown
+	if (tag.nti.nai.szAtsLen == 4 && tag.nti.nai.abtAts[0] == 78 && tag.nti.nai.abtAts[1] == 80 && tag.nti.nai.abtAts[2] == 70 && tag.nti.nai.abtAts[3] == 0x02) {
+	} else {
+          uint64_t id = 0;
+          for (size_t i{0}; i < tag.nti.nai.szUidLen; ++i)
+          {
+            id = (id << 8) | tag.nti.nai.abtUid[i];
+          }
+          return id;
+        }	
+      }
     }
 
     return 0;
